@@ -1,0 +1,74 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
+
+
+# 训练
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+import lightgbm as lgb
+import matplotlib.pyplot as plt
+from sklearn.metrics import precision_recall_curve,roc_auc_score, classification_report,roc_curve,auc
+
+def model_data_prepare(Train_data,label):
+    train_pos=Train_data[(Train_data[label]==1)]
+    train_neg=Train_data[(Train_data[label]!=1)]
+    if train_neg.shape[0]>train_pos.shape[0]*2:
+        train_neg=train_neg.sample(n=train_pos.shape[0]*2,random_state=None,axis=0)
+    if train_pos.shape[0]>train_neg.shape[0]*2:
+        train_pos=train_pos.sample(n=train_neg.shape[0]*2,random_state=None,axis=0)
+    Train=train_pos.append(train_neg).astype(np.float32)
+    X_train,X_test, y_train, y_test =train_test_split(Train.drop(['client_id',label],axis=1),Train[label],test_size=0.3, random_state=0)
+    return X_train,X_test, y_train, y_test
+
+
+def model_train(train_x, train_y,test_x, test_y,if_imp=False):
+    lg_train = lgb.Dataset(train_x,label=train_y)
+    lg_val = lgb.Dataset(test_x,test_y)
+    #需使用网格搜索参数
+    evals_result = {}
+    params = {'objective':'binary', 'num_leaves':300, 'max_depth':6, 'learning_rate':0.01, 
+              'n_estimators':3000,'metric':'binary_logloss',
+               'bagging_fraction':0.7,'feature_fraction':0.7,'bagging_frequency':7,
+              'bagging_seed':33,'seed':33}
+    
+    clf = lgb.train(params=params,train_set=lg_train,evals_result=evals_result,valid_sets=lg_val,early_stopping_rounds=5)
+    
+    
+    #clf.save_model(path.get('model_files')+str(kwargs.values())+label+'model.txt')
+    #ax = lgb.plot_metric(evals_result, metric='binary_logloss')#打印loss图
+    # ax2 = lgb.plot_tree(clf, tree_index=3, figsize=(20, 8), show_info=['split_gain']) #决策图
+    
+    
+    if if_imp:
+        ax3 = lgb.plot_importance(clf, max_num_features=3)#前3重要特征
+        plt.show()
+    print("模型训练完成")
+    return clf
+
+
+def model_score(in_path,feature_x,feature_y,label,model_name):
+    with open(path.get(in_path)+label+'.txt', 'w', encoding='utf-8') as fh:
+        yz_scores = model_name.predict(feature_x, num_iteration=model_name.best_iteration) #预测数据集
+        list_1 = []
+        list_2 = [0.9,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.1,0.05,0.02,0.001,0.0005]
+        list_3 = []
+        for a in list_2:
+            list_1 = []
+            for b in yz_scores:
+                if b>a:
+                    c = 1
+                    list_1.append(c)
+                if b<=a:
+                    c = 0
+                    list_1.append(c)
+            #print(a,'\n',classification_report(y_test,list_1))
+            
+            fh.write(classification_report(feature_y,list_1))
+
+    print('模型得分输出')
+
+
+    
