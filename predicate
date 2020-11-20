@@ -1,0 +1,89 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
+
+
+import pandas as pd
+import shap
+from collections import defaultdict, OrderedDict
+import json
+from data_config import top_list_dict
+from sklearn.metrics import classification_report,roc_curve,auc,f1_score,precision_score,recall_score
+
+def predict_top(model_name,pre_data,label):
+    X_data=pre_data.drop([label,'client_id'],axis=1)
+    predict_prob = model_name.predict(X_data, num_iteration=model_name.best_iteration)
+    cust_pre=pd.DataFrame(pre_data['client_id']).join(pd.DataFrame(predict_prob))
+    cust_pre.columns=['client_id','score']
+    cust_pre['pm']=cust_pre['score'].rank(method='first',ascending=False)
+    
+    if label in top_list_dict.keys():
+        data=cust_pre[cust_pre['pm']<=top_list_dict[label]]
+        
+    data['score'][data['score']>0]=1
+    return data[['client_id','score']],cust_pre
+
+def get_shap_value(model_name,org_data,X_datas,label):
+    
+
+    explainer = shap.TreeExplainer(model_name)
+    X_datas2=X_datas.drop(['client_id',label],axis=1)
+    shap_values = explainer.shap_values(X_datas2)
+    temp_df = pd.DataFrame(shap_values[0])
+    temp_df.columns=X_datas2.columns
+    
+    
+    column=list(X_datas2.columns)
+    temp1=(x.replace('_bin_1','') for x in column)
+    temp2=list(temp1)
+    temp2.append('client_id')
+    union_data=pd.merge(X_datas['client_id'],org_data[temp2],how='left',on='client_id')
+    org_data=pd.DataFrame(union_data.drop(['client_id'],axis=1))
+    
+    
+    #加入一列
+    X_datas['ew']='client_id'
+    cols = defaultdict(list)
+    target=dict()
+    print('start')
+    for i in  temp_df.index:
+        data=pd.DataFrame()
+        index_data=pd.DataFrame(temp_df.loc[i])
+        index_data.columns=['gxd']
+        index_data['tezheng']=index_data.index
+        
+        orgi_data=pd.DataFrame(org_data.loc[i])
+        orgi_data.columns=['data']
+        
+        index_data=index_data.reset_index(drop=True)
+        orgi_data=orgi_data.reset_index(drop=True)
+        out_data=index_data.join(orgi_data)
+        
+        out_data['pm']=out_data['gxd'].rank(method='first',ascending=False)
+        data=out_data[out_data['pm']<=10]
+        
+        test=dict()
+        test["name"]=list(data['tezheng'].values)
+        test["gxd"]=list(data['gxd'].values)
+        test["org_data"]=list(data['data'].values)
+        
+        cols["feat"].append(test)
+        
+        target[label+str(i)]={"id":label,str(X_datas.ew[i]):str(X_datas.client_id[i]),"feat":cols["feat"]}
+    json_str = json.dumps(target, indent=4)
+    
+    return json_str
+    #with open(os.path.join('/root','test.json'), 'w') as json_file:
+    #    json_file.write(json_str)
+
+
+
+def  top_report(compare_data,pre_data,label):
+    pre_data2=pre_data[['client_id',label]]
+    un_data=pd.merge(compare_data,pre_data2,how='left',on='client_id')
+    #print(label+'\n'+classification_report(pd.DataFrame(un_data['col_2']),pd.DataFrame(un_data[label])))
+    #print(type(label+'\n'+classification_report(un_data['clo_2'],un_data[label])))
+    
+    return un_data,(precision_score(pd.DataFrame(un_data[label]),pd.DataFrame(un_data['score']), average='binary'))
+
