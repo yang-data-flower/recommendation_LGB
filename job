@@ -1,0 +1,293 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[5]:
+
+
+import pandas as pd
+import os,sys
+import argparse
+import numpy as np
+from woe_iv import woe_single_x,woe_trans
+import lightgbm as lgb
+import datetime
+from IPython import get_ipython
+import  matplotlib.pyplot as plt
+
+
+
+from  save_hive_data import HiveHelper
+from  feature_handle import label_hd,label_fx
+from  model_train import model_data_prepare,model_train,model_score
+from threshold_search import model_serch,th_search,threshold_plt
+from data_config import get_path,labels
+from model_predict import predict_top,top_report
+from fold_create import create_fold,get_max_flod,base_dir2
+
+
+
+# print('done ...')
+cur_month=datetime.datetime.now().strftime('%Y%m')
+
+#创建版本文件夹
+def create_folder(version_name=None):
+    global path
+
+    if version_name ==None:
+        version_name=get_max_flod(file_name=base_dir2)
+        print(version_name)
+    path_base=create_fold(base_dir2,version_name)    
+    path=get_path(path_base)
+    
+
+
+    #创建文件夹及子文件夹
+    for i in path.values():
+        print(i)
+        if not os.path.exists(i):
+            os.makedirs(i)
+    return path
+    pass
+
+
+#here only  use for skip get data
+def test_path():
+    global path
+    path_base='/root/recommendation/process_rem/test/1.3.0-20201119'
+    path=get_path(path_base)
+    return path
+    pass
+
+
+
+
+#one times/month
+#hive_data
+
+def get_hive_data(train_month,test_month):
+    
+    
+    h=HiveHelper()
+    print(type(h))
+    
+    print("train start",datetime.datetime.now())
+    data_train=None
+    #get_ipython().run_line_magic('time', 'data_train=h.get_train_data(init_month, size=-1)')
+    data_train=h.get_train_data(train_month, size=-1)
+    data_train.to_csv(os.path.join(str(path.get('hive_files')),cur_month+'_data_train'+'.csv'),index=False)
+    print(data_train.info())
+    print(datetime.datetime.now())
+    print("train end",datetime.datetime.now())
+    
+   
+    print("test start",datetime.datetime.now())
+    data_test=None
+    #get_ipython().run_line_magic('time', 'data_test=h.get_test_data(init_month, size=-1)')
+    data_test=h.get_test_data(test_month, size=-1)
+    data_test.to_csv(os.path.join(str(path.get('hive_files')),cur_month+'_data_test'+'.csv'),index=False)
+    print(data_test.info())
+    print("test end",datetime.datetime.now())
+    
+    pass
+
+
+
+def data_preprocess(hv_fcsv):
+    #filter
+#     data_train=pd.read_csv(os.path.join(str(path.get('hive_files')),cur_month+'_data_train'+'.csv'))
+
+    if not os.path.isfile(hv_fcsv):
+        raise ValueError(hv_fcsv, 'not found')
+    data_train=pd.read_csv(hv_fcsv)
+
+    #data_train=pd.read_csv('/root/recommendation/process_rem/py_files/lab/1.0.4-20201110/data_train.csv')
+    filter_data=label_hd(data_train, labels)
+    print(filter_data.info())
+    return filter_data
+
+
+def get_feat_and_train(in_data):
+    for i in labels:
+        #bin
+        prs_data=None
+        X_train=None
+        X_test=None
+        y_train=None
+        y_test=None
+        #bins保存
+        bining,prs_data=label_fx(in_data,i)
+        with open(os.path.join(path['train_bin_sql'],cur_month+i+'.txt'),'w') as xr:
+            xr.writelines('\n'.join(bining))
+        prs_data.to_csv(os.path.join(str(path.get('proce_files')),cur_month+i+'.csv'),index=False)
+        
+        
+        #feature handling
+        X_train,X_test, y_train, y_test=model_data_prepare(prs_data,i)
+        print(X_train.shape, X_test.shape)
+        
+        
+        #training and model outputs
+        clf=model_train(X_train, y_train,X_test, y_test)
+        clf.save_model(os.path.join(str(path.get('model_files')),cur_month+i+'_model.lgb'))
+        
+        #score search
+        fn_value=1.
+        score_list,f_2=model_serch(clf,X_test,y_test,f_n=fn_value)
+        f_2.columns=['yz','f%.1f'%fn_value,'p','r']
+        f_2.to_csv(os.path.join(path['test_score_files'],cur_month+i+'.csv'),index=False)
+        
+        
+        
+        #thsearch,save
+        ret=th_search(f_2[['yz','f%.1f'%fn_value]],i)
+        with open(os.path.join(path['test_score_files'],cur_month+'_yz.txt'), 'a', encoding='utf-8') as fh:
+            fh.write('%s\t%f\n'%(i, ret))
+        
+        #score plot,save
+#         threshold_plt(f_2, f,i)
+    pass
+
+
+def draw_plot():
+    print(__name__)
+    j=0
+    #fig = plt.figure('confusion results', figsize=(10, 40), dpi=100, facecolor='silver', frameon=True)
+    #print(type(fig))
+    
+    for label_i in labels: 
+        j=j+1
+        score_matrix=pd.read_csv(os.path.join(path['test_score_files'],cur_month+label_i+'.csv'))
+        print(label_i,"start")
+        
+        
+        col_list=score_matrix.columns.to_list()
+        x=score_matrix[col_list[0]].values
+        
+        for col in col_list[1:]:
+            print(label_i,"start")
+            print(label_i,j)
+            plt.subplot(11,2,j)
+            
+            plt.plot(x, score_matrix[col].values, label=col)
+            plt.title(label_i)
+            
+            fn_value=1.
+            plt.axvline(th_search(score_matrix[['yz','f%.1f'%fn_value]],label_i), color='red')
+            #plt.axvline(.5, color='yellow')
+            plt.grid()
+            plt.xlim((0,1.))
+            plt.legend()
+            print(label_i,"end")
+
+
+    print("circle done.")
+    #plt.show()
+    
+    plt.savefig(os.path.join(path['report_png'],cur_month+'_'+'score_report.png'))
+    print("plot done.")    
+    pass
+
+
+def predict_target():
+    pre_data2=pd.DataFrame()
+    data_test=pd.read_csv(os.path.join(str(path.get('hive_files')),cur_month+'_data_test'+'.csv'))
+    in_data=label_hd(data_test,labels)   
+    
+    for label_i in labels:
+        #训练集bins获取执行
+        pres_data=pd.DataFrame()
+        pres_data[['client_id',label_i]]=in_data[['client_id',label_i]]
+        with open(os.path.join(path['train_bin_sql'],cur_month+label_i+'.txt'), 'r') as file_to_read:
+            train_bins=file_to_read.read()
+        train_bins=train_bins.replace('data_1','pres_data')
+        exec(train_bins)
+        
+        
+        #pres_data=label_fx(filter_data,label_i)
+        pres_data2=pres_data.drop(['client_id'],axis=1).astype(np.float32)
+        pres_data2['client_id']=pres_data['client_id']
+        pres_data2.to_csv(os.path.join(path['predict_result'],cur_month+label_i+'pre_data_hd.csv'),index=False)
+        
+        
+        clf=lgb.Booster(model_file=os.path.join(str(path.get('model_files')),cur_month+label_i+'_model.lgb'))
+        data,cust_pre_prob=predict_top(clf,pres_data2,label_i)
+        cust_pre_prob.to_csv(os.path.join(path['predict_result'],cur_month+label_i+'pre_result_prob.csv'),index=False)
+        
+        target_data,label_score=top_report(data,data_test,label_i)
+        with open(os.path.join(path['report_png'],cur_month+'_top_score.txt'), 'a', encoding='utf-8') as fh:
+            fh.write('%s\t%f\n'%(label_i, label_score))
+        target_data2=target_data.drop([label_i],axis=1)
+        target_data2.columns=['client_id',label_i]
+        #输出到csv
+        
+        if os.path.exists(os.path.join(path['predict_result'],cur_month+'pre_result.csv')):
+            print('读取数据')
+            start_data=pd.read_csv(os.path.join(path['predict_result'],cur_month+'pre_result.csv'))
+            pre_data2=pd.merge(start_data,target_data2,how='left',on='client_id')
+            pre_data2.fillna(0,inplace=True)
+            if not pre_data2.empty:
+                print('数据集不为空')
+                pre_data2.to_csv(os.path.join(path['predict_result'],cur_month+'pre_result.csv'),index=False)
+            
+        else:
+            print('初始化数据')
+            pre_data=pd.merge(data_test['client_id'],target_data2,how='left',on='client_id')
+            pre_data.fillna(0,inplace=True)
+            pre_data.to_csv(os.path.join(path['predict_result'],cur_month+'pre_result.csv'),index=False)
+            
+    pass
+
+def last_handle():
+    org_data=pd.read_csv(os.path.join(str(path.get('hive_files')),cur_month+'_data_test'+'.csv'))
+    for label_i in labels:
+        X_datas=pd.read_csv(os.path.join(path['predict_result'],cur_month+label_i+'pre_data_hd.csv'))
+        clf=lgb.Booster(model_file=os.path.join(str(path.get('model_files')),cur_month+label_i+'_model.lgb'))
+        json_str=get_shap_value(clf,org_data,X_datas,label_i)    
+        with open(os.path.join(path['predict_result'],cur_month+'pre_data_hd_shap.json'), 'a') as json_file:
+             json_file.write(json_str)
+    pass
+
+
+def main(version,train_month_id,test_month_id):
+    
+    print(version)
+    print(train_month_id)
+    print(test_month_id)
+    
+    #训练,验证部分
+    
+#     create_folder(version) 
+#     get_hive_data(train_month_id,test_month_id)
+    test_path()
+  
+    filter_data=data_preprocess(os.path.join(path['hive_files'],cur_month+'_data_train'+'.csv'))
+    get_feat_and_train(filter_data)
+#     test_path()
+    draw_plot()  #绘制得分图
+    
+    #预测
+    predict_target()
+    pass
+
+
+if __name__=='__main__':
+    print(datetime.datetime.now(), 'start ...')
+    parse=argparse.ArgumentParser(description='into para')
+    parse.add_argument('--v',nargs='?')
+    parse.add_argument('--train_m')
+    parse.add_argument('--test_m')
+    args = parse.parse_args()
+    #print(args)
+    version_t=args.v
+    train_month_id=args.train_m
+    test_month_id=args.test_m
+    main(version_t,train_month_id,test_month_id)
+    print(datetime.datetime.now(), 'all done ...')
+    pass
+
+
+# In[ ]:
+
+
+
+
