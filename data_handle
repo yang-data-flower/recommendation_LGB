@@ -1,0 +1,91 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
+
+
+#数据处理模块
+import pandas as pd
+from data_config import labels,fx_cloumns
+from woe_iv import woe_single_x,woe_trans
+from bin_chi import ChiMerge3
+
+def label_hd(data,all_label):
+    d_index=data.loc[(data[all_label]==0).all(axis=1)].index
+    #print(d_index)
+    df2=data[~data.index.isin(d_index)]
+    df=df2.reset_index(drop=True)
+    print("标签全0值去除完成")
+    return df
+
+
+def label_fx(in_data,label):
+    bins=[]
+    data_1=pd.DataFrame()
+    data_1[['client_id',label]]=in_data[['client_id',label]]
+    if fx_cloumns in in_data.columns:
+        columns_bfx=in_data[fx_cloumns].columns    
+    print(columns_bfx)
+ 
+    temp_col=fx_cloumns_test.copy()                 
+    temp_col.extend(labels)
+    temp_col.extend(['client_id'])
+    columns_fx=in_data.drop(temp_col,axis=1).columns
+    print(temp_col)
+    
+    for i in columns_fx:
+        try: 
+            single_map = ChiMerge3(in_data[[i,label]],10,[0,1],pvalue_edge=0.05)
+            
+            mycode = "data_1['" +i+"_bin_1']"+'=in_data.'+i+'.apply(lambda x:'  +single_map[1] + ')'          
+            exec(mycode)
+            iv=woe_single_x(data_1[i+'_bin_1'],data_1[label])[1]
+            print(i)        
+            if iv<0.02:
+                data_1=data_1.drop([i+'_bin_1'],axis=1)  #删除iv小于0.02的字段
+                del iv,mycode
+            else:
+                bins.append(mycode) 
+                del iv,mycode
+        except: 
+            mycode = "data_1['" +i+"_bin_1']"+'=in_data.'+i+'.apply(lambda x: str(0) if x<=0.000000 else str(0+1))'
+            exec(mycode)
+            iv=woe_single_x(data_1[i+'_bin_1'],data_1[label])[1]
+            
+            if iv<0.02:
+                data_1=data_1.drop([i+'_bin_1'],axis=1)  #删除iv小于0.02的字段
+                del iv,mycode        
+            else:
+                bins.append(mycode)
+                del iv,mycode
+  
+###循环输出2分类字段
+    if not columns_bfx:
+        for k in columns_bfx:
+                data_1[k+'_bin_1']=in_data[k]
+                mycode="data_1['" +k+"_bin_1']"+'=in_data.'+k
+                iv=woe_single_x(data_1[k+'_bin_1'],data_1[label])[1]
+                
+        
+                if iv<0.02:
+                    data_1=data_1.drop([k+'_bin_1'],axis=1)  #删除iv小于0.02的字段
+                    del iv,mycode
+                else:
+                    bins.append(mycode)
+                    del iv,mycode
+    print(label+"分箱完成")
+    #去除woe，保留分箱
+#     var_cloumns=data_1.columns[data_1.columns.str.endswith('bin_1')]
+#     data_1,woe_maps_2,iv_values_2 = woe_trans(data_1[var_cloumns],data_1[label],data_1)
+#    print(label+'特征工程完成')
+    
+    return bins,data_1
+
+class data_handle:
+    def get_process_data(in_data,all_labels,target_label):
+        #全0标签处理
+        data=label_hd(in_data,all_labels)
+        #分箱，woe处理，保存（可用for循环）
+        prs_data=label_fx(data,target_label)
+        print("process_data done")
+
