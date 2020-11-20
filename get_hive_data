@@ -1,0 +1,70 @@
+#取数模块ll
+from pyhive import hive
+import pandas as pd
+from data_config import item_dict,connect
+import numpy as np
+
+
+def sql_cmd_builder(item_list, from_content, **kwargs):
+    return 'select %s from ai.%s where %s'%(','.join(item_list), from_content, 
+                                            ' and '.join(['%s="%s"'%(k, kwargs[k]) for k in kwargs]))
+    #print(cmd)
+#     return from_content,kwargs,cmd
+
+
+def hive_data(conn, col_list, table_name, init_month, fetch_size=-1, verbose=True):
+    # conn = hive.Connection(host=connect.get('host'), port=connect.get('port'),username=connect.get('user_name'), database=connect.get('db'))
+    cursor = conn.cursor()
+    sql_cmd=sql_cmd_builder(col_list, table_name, init_month=init_month)
+    if verbose:
+        print(sql_cmd)
+    cursor.execute(sql_cmd)
+    data=cursor.fetchall() if fetch_size < 0 else cursor.fetchmany(size=fetch_size)
+    data = pd.DataFrame(data,columns=col_list)   # item_dict.keys())
+    
+    data2=data.drop(['client_id'],axis=1).astype(np.float32)
+    data2['client_id']=data['client_id']
+    print(data2.dtypes)
+    #print(path.get('hive_files')+'/'+from_content+kwargs.get('init_month')+'.csv')
+    # data.to_csv(path.get('hive_files')+'/'+from_content+str(kwargs.values())+'.csv',index=False)
+    #print(date+'_'+table+'.csv文件保存完毕')
+    return data2
+
+
+class HiveHelper:
+    def __init__(self, host=connect['host'], port=connect['port'], username=connect['username'], db_name=connect['db']):
+        self.host=host
+        self.port=port
+        self.username=username
+        self.db_name=db_name
+        
+    def get_train_data(self, init_month, size=-1):
+    #     col_template=pd.read_csv('train_table_desc.csv')
+    #     col_list=col_template['col_name'].to_list()
+        col_list=[k for k in item_dict]  
+        #print(col_list)
+
+        with hive.Connection(self.host, self.port, self.username, self.db_name) as conn:
+            df=hive_data(conn, col_list, 'user_info_pro_train', init_month, fetch_size=size, verbose=False)
+            print(df.info())
+            return df
+    
+    def get_test_data(self, init_month, size=-1):
+    #     col_template=pd.read_csv('train_table_desc.csv')
+    #     col_list=col_template['col_name'].to_list()
+        col_list=[k for k in item_dict]  
+        #print(col_list)
+
+        with hive.Connection(self.host, self.port, self.username, self.db_name) as conn:
+            df=hive_data(conn, col_list, 'user_info_pro_test', init_month, fetch_size=size, verbose=False)
+            print(df.info())
+            return df
+    pass
+
+
+
+if __name__=='__main__':
+    h=HiveHelper()
+    h.get_train_data('202008', size=10)
+    print('all done...')
+    pass
