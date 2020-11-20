@@ -1,0 +1,80 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
+
+import numpy as np
+import pandas as pd
+from sklearn.metrics import confusion_matrix,f1_score,precision_score,recall_score
+import matplotlib.pyplot as plt
+from data_config import get_path
+
+def model_serch(model_name,feature_x,y,f_n=1.):
+    
+    yz_scores = model_name.predict(feature_x, num_iteration=model_name.best_iteration)
+    
+    #print('----->', type(yz_socres))
+    
+    list_1 = []
+    list_2 = list(np.arange(0.01,1, .01))
+    yz = []
+    fn_scores=[]
+    recall_scores=[]
+    precision_scores=[]
+    for a in list_2:
+        list_1 = []
+        for b in yz_scores:
+            if b>a:
+                c = 1
+                list_1.append(c)
+            if b<=a:
+                c = 0
+                list_1.append(c)
+        yz.append(a)
+        tn, fp, fn, tp = confusion_matrix(y, list_1).ravel()
+    
+        #fn_scores.append(f1_score(y, list_1, average='binary'))
+        #print(f1_scores)
+        precision_score_in=precision_score(y, list_1, average='binary')
+        recall_score_in=recall_score(y, list_1, average='binary')
+        precision_scores.append(precision_score(y, list_1, average='binary'))
+        recall_scores.append(recall_score(y, list_1, average='binary'))
+        fn_scores.append(((1+f_n**2)*precision_score_in*recall_score_in)/((f_n**2)*precision_score_in+recall_score_in))
+        #fn=pd.concat([pd.DataFrame(yz),pd.DataFrame(fn_scores)],axis=1)
+        fn_all=pd.concat([pd.DataFrame(yz),pd.DataFrame(fn_scores),pd.DataFrame(precision_scores),pd.DataFrame(recall_scores)],axis=1)
+    return yz_scores,fn_all
+
+#加入label
+def th_search(data,label,col_a='col_a',col_b='col_b'):
+    data.columns=[col_a,col_b]
+    data2=data[data.col_b==data.col_b.max()]
+    ret=-1
+    if [(data2.iloc[[0]].col_a>0.2) & (data2.iloc[[0]].col_a<0.8)]:
+        ret=data2.iloc[[0]].col_a.values
+        print('搜索阈值为：%f'%ret)
+         
+    else:
+        print('无法搜索到阈值')
+    return ret
+
+
+def threshold_plt(df_score, df_f, label,savefig=False):
+    plt.rcParams['figure.dpi']=120
+    col_list=df_score.columns.to_list()
+    x=df_score[col_list[0]].values
+    for col in col_list[1:]:
+#         print(col)
+        plt.plot(x, df_score[col].values, label=col)
+    plt.grid()
+    plt.xlim((0,1.))
+    plt.legend()
+    plt.title(label)
+    # plt.xticks(x)
+    plt.axvline(th_search(df_f,label), color='red')
+    plt.axvline(.5, color='yellow')
+
+    plt.show()
+    if savefig:
+        plt.savefig(fname='/root/recommendation/process_rem/model_score/'+label+'.png',format='png')
+        pass
+    pass
